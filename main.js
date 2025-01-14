@@ -1,43 +1,67 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
-import vertexShader from './Shaders/outlineVer.glsl?raw'
-import fragmentShader from './Shaders/outlineFrg.glsl?raw'
-import { EffectComposer } from 'three/examples/jsm/Addons.js';
-import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
+import { EffectComposer } from "three/examples/jsm/postprocessing/EffectComposer";
+import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass";
 import { ShaderPass } from "three/examples/jsm/postprocessing/ShaderPass.js";
+import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
 
+import { CustomOutlinePass } from "./CustomOutlinePass.js";
+import FindSurfaces from "./FindSurfaces.js";
+
+import vertexShader from './Shaders/cubeVer.glsl?raw'
+import fragmentShader from './Shaders/cubeFrg.glsl?raw'
 
 const scene = new THREE.Scene();
-
+scene.background = new THREE.Color("rgb(113, 113, 113)");
 const renderer = new THREE.WebGLRenderer({canvas: document.querySelector('canvas')});
 renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth / 2, window.innerHeight / 2)
+
+
 
 
 const camera = new THREE.PerspectiveCamera( 50, window.innerWidth / window.innerHeight, 0.1, 1000 ); 
 camera.updateProjectionMatrix();
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.maxDistance = 30;
-controls.minDistance = 25;
+controls.maxDistance = 20;
+controls.minDistance = 20;
 
-const depthTexture = new THREE.DepthTexture();
-const renderTarget = new THREE.WebGLRenderTarget(window.innerWidth, window.innerHeight, {depthTexture: depthTexture, depthBuffer:true});
 
 const CUBESIZE = 3;
-const SPACING = 0.5;
+const SPACING = 0.2;
 const DIMENSIONS = 3;
 
-const geometry = new THREE.BoxGeometry( CUBESIZE, CUBESIZE, CUBESIZE ); 
-const material = new THREE.MeshBasicMaterial( { color: 0xffffff } );
+
+// const material = [
+//     new THREE.MeshBasicMaterial( { color: 0xc40014 } ), //red
+//     new THREE.MeshBasicMaterial( { color: 0xFF5800 } ), //orange
+//     new THREE.MeshBasicMaterial( { color: 0x00b029 } ), //green
+//     new THREE.MeshBasicMaterial( { color: 0x0a78ff } ), //blue
+//     new THREE.MeshBasicMaterial( { color: 0xffeb52 } ), //yellow
+//     new THREE.MeshBasicMaterial( { color: 0xFFFFFF } ), //white
+// ]
+
+
+
+
 // const cube = new THREE.Mesh( geometry, material ); 
 // scene.add(cube); 
 
 var increment = CUBESIZE + SPACING
 var allCubes = [];
 
+const geometry = new THREE.BoxGeometry( CUBESIZE, CUBESIZE, CUBESIZE); 
 
 
 function newCube(x,y,z) {
+    console.log(x,y,z)
+    const material = new THREE.ShaderMaterial({
+        uniforms: {
+            cubePosition: {value: new THREE.Vector3(x,y,z)},
+        },
+        vertexShader: vertexShader,
+        fragmentShader: fragmentShader
+    });
     var cube = new THREE.Mesh(geometry, material)
     cube.position.set(x,y,z)
     scene.add(cube)
@@ -59,114 +83,53 @@ for(var i=0; i<DIMENSIONS; i++){
     }
 }
 
-scene.rotateY +=50
+
+
+
 camera.position.z = 20;
 
-class CustomOutlinePass extends Pass {
-    constructor(resolution,scene, camera) {
-        super();
 
-        this.renderScene = scene;
-        this.renderCamera = camera;
-        this.resolution = new THREE.Vector2(resolution.x, resolution.y)
-
-        this.fsQuad = new FullScreenQuad(null);
-        this.fsQuad.material = this.createOutlineMaterial();
-        console.log(this.fsQuad.material.uniforms)
-
-        const normalTarget = new THREE.WebGLRenderTarget(
-            this.resolution.x,
-            this.resolution.y
-        );
-        normalTarget.texture.format = THREE.RGBFormat;
-        normalTarget.texture.minFilter = THREE.NearestFilter;
-        normalTarget.texture.magFilter = THREE.NearestFilter;
-        normalTarget.texture.generateMipmaps = false;
-        normalTarget.stencilBuffer = false;
-        this.normalTarget = normalTarget;
-
-        this.normalOverrideMaterial = new THREE.MeshNormalMaterial();
-
-        }
-        dispose() {
-            this.normalTarget.dispose();
-            this.fsQuad.dispose();
-        }
-        setSize(width,height){
-            this.normalTarget.setSize(width, height);
-            this.resolution.set(width,height);
-            this.fsQuad.material.uniforms.screenSize.value.set(
-                this.resolution.x,
-                this.resolution.y,
-                1 / this.resolution.x,
-                1 / this.resolution.y
-            );
-        }
-        render(renderer, writeBuffer, readBuffer){
-            const depthBufferValue = writeBuffer.depthBuffer;
-            writeBuffer.depthBuffer = false;
-
-            renderer.setRenderTarget(this.normalTarget);
-
-            const overrideMaterialValue = this.renderScene.overrideMaterial;
-            this.renderScene.overrideMaterial = this.normalOverrideMaterial;
-            renderer.render(this.renderScene, this.renderCamera);
-            this.renderScene.overrideMaterial = overrideMaterialValue;
-
-            this.fsQuad.material.uniforms["depthBuffer"].value = readBuffer.depthTexture;
-            this.fsQuad.material.uniforms["normalBuffer"].value = this.normalTarget.texture;
-            this.fsQuad.material.uniforms["sceneColorBuffer"].value = readBuffer.texture;
-
-            if (this.renderToScreen) {
-                renderer.setRenderTarget(null);
-                this.fsQuad.render(renderer)
-            } else {
-                renderer.setRenderTarget(writeBuffer);
-                this.fsQuad.render(renderer)
-            }
-
-            writeBuffer.depthBuffer = depthBufferValue;
-
-
-        }
-        createOutlineMaterial() {
-            return new THREE.ShaderMaterial({
-                uniforms: {
-                    debugVisualize: { value: 0},
-                    sceneColorBuffer: {},
-                    depthBuffer: {},
-                    normalBuffer: {},
-                    outlineColor: {value: new THREE.Color(0xffffff)},
-                    multiplierParameters: {value: new THREE.Vector4(1,1,1,1)},
-                    cameraNear: {value: this.renderCamera.near},
-                    cameraFar: {value: this.renderCamera.far},
-                    screenSize:{
-                        value: new THREE.Vector4(
-                            this.resolution.x,
-                            this.resolution.y,
-                            1 / this.resolution.x,
-                            1 / this.resolution.y
-                        )
-                    },
-                },
-                vertexShader: vertexShader,
-                fragmentShader: fragmentShader
-            });
-        }
-}
-    
-const composer = new EffectComposer(renderer, renderTarget);
-const pass = new RenderPass(scene, camera);
-composer.addPass(pass);
-
-const customOutline = new CustomOutlinePass(
-    new THREE.Vector2(window.innerWidth, window.innerHeight),
-    scene,
-    camera
+const depthTexture = new THREE.DepthTexture();
+const renderTarget = new THREE.WebGLRenderTarget(
+  window.innerWidth,
+  window.innerHeight,
+  {
+    depthTexture: depthTexture,
+    depthBuffer: true,
+  }
 );
+
+const composer = new EffectComposer(renderer, renderTarget);
+composer.setSize(window.innerWidth / 2, window.innerHeight / 2)
+const renderPass = new RenderPass(scene,camera);
+composer.addPass(renderPass);
+
+const customOutline = new CustomOutlinePass(new THREE.Vector2(window.innerWidth, window.innerHeight), scene, camera);
 composer.addPass(customOutline)
 
+
+const effectFXAA = new ShaderPass(FXAAShader);
+effectFXAA.uniforms["resolution"].value.set(
+  1 / window.innerWidth,
+  1 / window.innerHeight
+);
+composer.addPass(effectFXAA);
+
+
+const surfaceFinder = new FindSurfaces();
+surfaceFinder.surfaceId = 0;
+scene.traverse((node) => {
+    if (node.type == "Mesh") {
+        const colorsTypedArray = surfaceFinder.getSurfaceIdAttribute(node);
+        node.geometry.setAttribute("color", new THREE.BufferAttribute(colorsTypedArray, 4));
+    }
+});
+customOutline.updateMaxSurfaceId(surfaceFinder.surfaceId + 1);
+
+scene.rotation.x += 10;
+
 function update() {
+    scene.rotation.y +=0.002;
     requestAnimationFrame(update);
     composer.render();
 }
@@ -177,9 +140,8 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
   
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    composer.setSize(window.innerWidth, window.innerHeight);
-    customOutline.setSize(window.innerWidth, window.innerHeight);
+    renderer.setSize(window.innerWidth / 2, window.innerHeight / 2);
+    composer.setSize(window.innerWidth / 2, window.innerHeight / 2);
 }
 window.addEventListener("resize", onWindowResize, false);
 
