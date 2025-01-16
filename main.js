@@ -9,7 +9,6 @@ import { CustomOutlinePass } from "./CustomOutlinePass.js";
 import FindSurfaces from "./FindSurfaces.js";
 
 
-
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("rgb(113, 113, 113)");
 const renderer = new THREE.WebGLRenderer({canvas: document.querySelector('canvas')});
@@ -28,24 +27,16 @@ camera.updateProjectionMatrix();
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.maxDistance = 20;
 controls.minDistance = 20;
+controls.enableDamping = true;
+controls.dampingFactor = 0.1;
+controls.mouseButtons= {
+    RIGHT: THREE.MOUSE.ROTATE
+}
 
 
 const CUBESIZE =2;
 const SPACING = 0.5;
 const DIMENSIONS = 3;
-
-
-
-// const material = [
-//     new THREE.MeshBasicMaterial( { color: 0x00b029 } ), //green +x
-//     new THREE.MeshBasicMaterial( { color: 0x0a78ff } ), //blue  -x
-//     new THREE.MeshBasicMaterial( { color: 0xffeb52 } ), //yellow 
-//     new THREE.MeshBasicMaterial( { color: 0xFFFFFF } ), //white
-//     new THREE.MeshBasicMaterial( { color: 0xc40014 } ), //red
-//     new THREE.MeshBasicMaterial( { color: 0xFF5800 } ), //orange
-// ]
-
-
 
 
 // const cube = new THREE.Mesh( geometry, material ); 
@@ -104,18 +95,45 @@ camera.position.z = 20;
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
 
-window.addEventListener( 'pointermove', onPointerMove );
+
 
 function onPointerMove(event) {
-    
-    pointer.x = (event.clientX / window.innerWidth) * 2 - 1;
-    pointer.y = - (event.clientY / window.innerHeight) * 2 + 1;
-
-    return raycaster.intersectObjects(scene.children, true).length > 0;
-    
+    if(mouseCheck == false) {
+        return
+    }
+    let canvasBounds = canvas.getBoundingClientRect();
+    pointer.x = ((event.clientX - canvasBounds.left) / (canvasBounds.right - canvasBounds.left)) * 2 - 1;
+    pointer.y = -((event.clientY - canvasBounds.top) / (canvasBounds.bottom - canvasBounds.top)) * 2 + 1;
 
 }
+window.addEventListener( 'pointermove', onPointerMove );
 
+
+function onMouseClick(event) {
+    if(mouseCheck == false) {
+        return
+    }
+
+    if ("buttons" in event) {
+        if (event.buttons != 1){
+            return
+        }
+    }
+
+
+    let rotVec = new THREE.Vector3(0,0,0)
+    if(axis == "x"){rotVec.x = axisVal}
+    if(axis == "y"){rotVec.y = axisVal}
+    if(axis == "z"){rotVec.z = axisVal}
+    rotVec.normalize()
+    console.log(rotVec)
+    for (i=0;i<currentRotCubes.length;i++){
+        currentRotCubes[i].position.applyMatrix4(new THREE.Matrix4().makeRotationAxis(rotVec, Math.PI/2))
+        currentRotCubes[i].rotateOnWorldAxis(rotVec, Math.PI/2)
+    }
+
+}
+window.addEventListener( "mousedown", onMouseClick);
 
 const depthTexture = new THREE.DepthTexture();
 const renderTarget = new THREE.WebGLRenderTarget(
@@ -157,13 +175,85 @@ customOutline.updateMaxSurfaceId(surfaceFinder.surfaceId + 1);
 
 scene.rotation.x += 10;
 
+let currentCube
 
+let mouseCheck
+
+var canvas = document.getElementById("canvas")
+canvas.addEventListener("mouseover", mouseOnCanvas)
+canvas.addEventListener("mouseleave", mouseOffCanvas)
+
+function mouseOnCanvas() {
+    mouseCheck = true;
+}
+
+function mouseOffCanvas() {
+    mouseCheck = false;
+}
+
+const offset = CUBESIZE + SPACING
+
+function getCubesOnAxis(axis, val){
+    let selectedCubes = []
+    for (i=0;i<allCubes.length;i++){
+        if (axis == "x") {
+            if (allCubes[i].position.x == val) {
+                selectedCubes.push(allCubes[i])
+            }
+        }
+
+        if (axis == "y") {
+            console.log("y")
+            if (allCubes[i].position.y == val) {
+                selectedCubes.push(allCubes[i])
+            }
+        }
+
+        if (axis == "z") {
+            console.log("z")
+            if (allCubes[i].position.z == val) {
+                selectedCubes.push(allCubes[i])
+            }
+        }
+
+    }
+    return selectedCubes
+}
+
+let currentRotCubes
+let axis
+let axisVal
 
 function update() {
+    if (mouseCheck==false){
+        scene.rotation.y +=0.002;
+    }
 
-    scene.rotation.y +=0.002;
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObjects(scene.children);
+
+    if (intersects.length > 0) {
+        currentCube = intersects[0].object
+        let pos = currentCube.position
+        let cubeType = Math.abs(pos.x) + Math.abs(pos.y) + Math.abs(pos.z)
+        
+        if (cubeType == offset){
+            let keys = Object.keys(pos)
+            for(i=0; i<keys.length;i++){
+                if(pos[keys[i]] != 0) {
+                    axis = keys[i]
+                    axisVal = pos[axis]
+                    currentRotCubes = getCubesOnAxis(axis,axisVal)
+                }
+            }
+        }
+
+
+    }
+
     requestAnimationFrame(update);
     composer.render();
+
 }
 update();
 
