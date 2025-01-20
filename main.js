@@ -7,10 +7,12 @@ import { FXAAShader } from "three/examples/jsm/shaders/FXAAShader.js";
 
 import { CustomOutlinePass } from "./CustomOutlinePass.js";
 import FindSurfaces from "./FindSurfaces.js";
+import TWEEN, { Group } from '@tweenjs/tween.js';
+
 
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color("rgb(113, 113, 113)");
+scene.background = new THREE.Color("rgb(75, 75, 75)");
 const renderer = new THREE.WebGLRenderer({canvas: document.querySelector('canvas')});
 renderer.setPixelRatio(window.devicePixelRatio);
 renderer.setSize(window.innerWidth / 2, window.innerHeight / 2)
@@ -33,6 +35,7 @@ controls.mouseButtons= {
     RIGHT: THREE.MOUSE.ROTATE
 }
 
+camera.position.z = 20;
 
 const CUBESIZE =2;
 const SPACING = 0.5;
@@ -48,26 +51,34 @@ var allCubes = [];
 
 const geometry = new THREE.BoxGeometry( CUBESIZE, CUBESIZE, CUBESIZE); 
 
-// Blue - Green - Yellow - White - Orange - Red
-var colors = [0x0a78ff, 0x00b029, 0xffeb52, 0xFFFFFF, 0xfc7830, 0xc40014]
+//(z):Blue/Green (y):Yellow/White (x):Orange/Red
+var colors = [0x0a78ff, 0x05e639, 0xffeb52, 0xFFFFFF, 0xfc7830, 0xc40014]
+var black = new THREE.MeshBasicMaterial( { color: 0x000000 } )
+var white = new THREE.MeshBasicMaterial( { color: 0x999999 } )
 
-function getAxisColours(val, posCol, negCol) {
-    if (val < 0) {return [new THREE.MeshBasicMaterial( { color: 0x000000 } ), new THREE.MeshBasicMaterial( { color: negCol } )]}
-    if (val > 0) {return [new THREE.MeshBasicMaterial( { color: posCol } ), new THREE.MeshBasicMaterial( { color: 0x000000 } )]}
-    return [new THREE.MeshBasicMaterial( { color: 0x000000 } ), new THREE.MeshBasicMaterial( { color: 0x000000 } )]
+function getAxisColours(val, posCol, negCol, innerCol) {
+    if (val < 0) {return [innerCol, new THREE.MeshBasicMaterial( { color: negCol } )]}
+    if (val > 0) {return [new THREE.MeshBasicMaterial( { color: posCol } ), innerCol]}
+    return [innerCol, innerCol]
+}
+
+function createCubeMaterial(x,y,z,inner) {
+    return [
+        ...getAxisColours(x, colors[0], colors[1], inner), // x-axis
+        ...getAxisColours(y, colors[2], colors[3], inner), // y-axis
+        ...getAxisColours(z, colors[4], colors[5], inner)  // z-axis
+    ]
 }
 
 function newCube(x,y,z) {
-    let material = [
-        ...getAxisColours(x, colors[0], colors[1]), // x-axis
-        ...getAxisColours(y, colors[2], colors[3]), // y-axis
-        ...getAxisColours(z, colors[4], colors[5])  // z-axis
-    ]
+    let blackMat = createCubeMaterial(x,y,z,black)
+    let whiteMat = createCubeMaterial(x,y,z,white)
 
-    var cube = new THREE.Mesh(geometry, material)
+
+    var cube = new THREE.Mesh(geometry, blackMat)
     cube.position.set(x,y,z)
     scene.add(cube)
-    allCubes.push(cube)
+    allCubes.push([cube, blackMat, whiteMat])
 }
 
 var positionOffset = (DIMENSIONS - 1) / 2;
@@ -78,8 +89,6 @@ for(var i=0; i<DIMENSIONS; i++){
             var x = (i-positionOffset) * increment
             var y = (j-positionOffset) * increment
             var z = (k-positionOffset) * increment
-            
-            
 
             if(!(x==0 && y==0 && z==0)){
                 console.log(x,y,z)
@@ -90,12 +99,10 @@ for(var i=0; i<DIMENSIONS; i++){
     }
 }
 
-camera.position.z = 20;
+//Mouse Control
 
 const raycaster = new THREE.Raycaster();
 const pointer = new THREE.Vector2();
-
-
 
 function onPointerMove(event) {
     if(mouseCheck == false) {
@@ -120,20 +127,36 @@ function onMouseClick(event) {
         }
     }
 
+    // rotateCubes()
 
     let rotVec = new THREE.Vector3(0,0,0)
     if(axis == "x"){rotVec.x = axisVal}
     if(axis == "y"){rotVec.y = axisVal}
     if(axis == "z"){rotVec.z = axisVal}
     rotVec.normalize()
-    console.log(rotVec)
     for (i=0;i<currentRotCubes.length;i++){
-        currentRotCubes[i].position.applyMatrix4(new THREE.Matrix4().makeRotationAxis(rotVec, Math.PI/2))
-        currentRotCubes[i].rotateOnWorldAxis(rotVec, Math.PI/2)
+        currentRotCubes[i][0].position.applyMatrix4(new THREE.Matrix4().makeRotationAxis(rotVec, Math.PI/2))
+        currentRotCubes[i][0].rotateOnWorldAxis(rotVec, Math.PI/2)
     }
 
 }
 window.addEventListener( "mousedown", onMouseClick);
+
+let mouseCheck = false
+
+var canvas = document.getElementById("canvas")
+canvas.addEventListener("mouseover", mouseOnCanvas)
+canvas.addEventListener("mouseleave", mouseOffCanvas)
+
+function mouseOnCanvas() {
+    mouseCheck = true;
+}
+
+function mouseOffCanvas() {
+    mouseCheck = false;
+}
+
+//Post processing outlines and anti-aliasing
 
 const depthTexture = new THREE.DepthTexture();
 const renderTarget = new THREE.WebGLRenderTarget(
@@ -176,57 +199,89 @@ customOutline.updateMaxSurfaceId(surfaceFinder.surfaceId + 1);
 scene.rotation.x += 10;
 
 let currentCube
-
-let mouseCheck
-
-var canvas = document.getElementById("canvas")
-canvas.addEventListener("mouseover", mouseOnCanvas)
-canvas.addEventListener("mouseleave", mouseOffCanvas)
-
-function mouseOnCanvas() {
-    mouseCheck = true;
-}
-
-function mouseOffCanvas() {
-    mouseCheck = false;
-}
-
 const offset = CUBESIZE + SPACING
 
 function getCubesOnAxis(axis, val){
     let selectedCubes = []
+
     for (i=0;i<allCubes.length;i++){
         if (axis == "x") {
-            if (allCubes[i].position.x == val) {
+            if (allCubes[i][0].position.x == val) {
                 selectedCubes.push(allCubes[i])
+                allCubes[i][0].material = allCubes[i][2]
             }
         }
-
         if (axis == "y") {
-            console.log("y")
-            if (allCubes[i].position.y == val) {
+            if (allCubes[i][0].position.y == val) {
                 selectedCubes.push(allCubes[i])
+                allCubes[i][0].material = allCubes[i][2]
+            }
+        }
+        if (axis == "z") {
+            if (allCubes[i][0].position.z == val) {
+                selectedCubes.push(allCubes[i])
+                allCubes[i][0].material = allCubes[i][2]
             }
         }
 
-        if (axis == "z") {
-            console.log("z")
-            if (allCubes[i].position.z == val) {
-                selectedCubes.push(allCubes[i])
-            }
-        }
 
     }
     return selectedCubes
 }
 
+// let rotationGroup = new THREE.Group();
+// scene.add(rotationGroup)
+// rotationGroup.position.set(0,0,0)
+
+// function rotateCubes() {
+//     rotationGroup.rotation.set(0,0,0);
+//     rotationGroup.updateWorldMatrix();
+//     for (i=0;i<currentRotCubes.length;i++){
+//         rotationGroup.add(currentRotCubes[i][0])
+//     }
+
+//     if (axis = "x"){
+//         new TWEEN.Tween(rotationGroup.rotation.x,true)
+//             .to(Math.PI/2, 100)
+//             .easing(TWEEN.Easing.Sinusoidal.InOut)
+//             .start();
+//     }
+//     else if (axis = "y"){
+//         new TWEEN.Tween(rotationGroup.rotation.y,true)
+//             .to(Math.PI/2, 100)
+//             .easing(TWEEN.Easing.Sinusoidal.InOut)
+//             .start();
+//     }
+//     else{
+//         new TWEEN.Tween(rotationGroup.rotation.z,true)
+//             .to(Math.PI/2, 100)
+//             .easing(TWEEN.Easing.Sinusoidal.InOut)
+//             .start();
+//     }
+    
+//     rotationGroup.remove(...rotationGroup.children)
+
+
+// }
+
+//Rendering and Rotation Control
+
+
+
 let currentRotCubes
+let previousCubes
 let axis
 let axisVal
 
 function update() {
     if (mouseCheck==false){
         scene.rotation.y +=0.002;
+    }
+
+    if(currentRotCubes != previousCubes && previousCubes != null) {
+        for(i=0;i<previousCubes.length;i++){
+            previousCubes[i][0].material = previousCubes[i][1]
+        }
     }
 
     raycaster.setFromCamera(pointer, camera);
@@ -243,17 +298,15 @@ function update() {
                 if(pos[keys[i]] != 0) {
                     axis = keys[i]
                     axisVal = pos[axis]
+                    previousCubes = currentRotCubes
                     currentRotCubes = getCubesOnAxis(axis,axisVal)
                 }
             }
         }
 
-
     }
-
     requestAnimationFrame(update);
     composer.render();
-
 }
 update();
 
@@ -267,21 +320,3 @@ function onWindowResize() {
 }
 window.addEventListener("resize", onWindowResize, false);
 
-// function resizeCanvas() {
-// 	const canvas = renderer.domElement;
-// 	const width = canvas.clientWidth;
-// 	const height = canvas.clientHeight;
-// 	if (canvas.width !== width || canvas.height !== height) {
-// 		renderer.setSize(width, height, false);
-// 		camera.aspect = width/height;
-// 		camera.updateProjectionMatrix();
-// 	}
-	
-// }
-
-// function animate() { 
-//     controls.update();
-//     resizeCanvas();
-//     renderer.render( scene, camera ); 
-// } 
-// renderer.setAnimationLoop( animate );
